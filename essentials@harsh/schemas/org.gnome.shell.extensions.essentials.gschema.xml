@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.essentials" path="/org/gnome/shell/extensions/essentials/">
+    <!-- Features -->
+    <key name="feature-power" type="b">
+      <default>true</default>
+      <summary>Power monitor in the top bar, battery details and charge limit</summary>
+    </key>
+    <key name="feature-recent-files" type="b">
+      <default>true</default>
+      <summary>Recent files menu with quick look</summary>
+    </key>
+    <key name="feature-clipboard" type="b">
+      <default>true</default>
+      <summary>Clipboard history</summary>
+    </key>
+    <key name="feature-display-layout" type="b">
+      <default>true</default>
+      <summary>Display layouts (save/restore, external only, join)</summary>
+    </key>
+
+    <!-- Recent files -->
+    <key name="recent-files-shortcut" type="as">
+      <default><![CDATA[['<Super>r']]]></default>
+      <summary>Shortcut that opens the recent-files menu</summary>
+    </key>
+    <key name="preview-delay" type="i">
+      <range min="0" max="10000"/>
+      <default>3000</default>
+      <summary>Hover time (ms) before the quick-look card appears; 0 turns hover preview off</summary>
+    </key>
+    <key name="list-length" type="i">
+      <range min="3" max="20"/>
+      <default>8</default>
+      <summary>How many downloads and recently opened files to list</summary>
+    </key>
+    <key name="show-screenshots" type="b">
+      <default>true</default>
+      <summary>Show the Screenshots section</summary>
+    </key>
+    <key name="show-recent" type="b">
+      <default>true</default>
+      <summary>Show the Recently opened section</summary>
+    </key>
+    <key name="fresh-minutes" type="i">
+      <range min="1" max="120"/>
+      <default>10</default>
+      <summary>Minutes a new download or screenshot stays in the top bar</summary>
+    </key>
+
+    <!-- Clipboard -->
+    <key name="clipboard-shortcut" type="as">
+      <default><![CDATA[['<Super>v']]]></default>
+      <summary>Shortcut that opens the clipboard history</summary>
+    </key>
+    <key name="paste-on-select" type="b">
+      <default>true</default>
+      <summary>Paste into the focused window after choosing a clipboard item</summary>
+    </key>
+  </schema>
+</schemalist>

@@ -1,0 +1,13 @@
+[Unit]
+Description=Adaptive CPU power cap for weak (USB-C) chargers
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/usbc-power-cap
+# Factory CPU limits back even if the loop was killed.
+ExecStopPost=/usr/local/bin/usbc-power-cap --restore
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

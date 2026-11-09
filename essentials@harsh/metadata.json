@@ -1,0 +1,9 @@
+{
+  "uuid": "essentials@harsh",
+  "name": "Essentials",
+  "description": "Power monitor, recent files with quick look, clipboard history (Super+V) and display layouts. Each feature can be switched on or off in Settings.",
+  "shell-version": [
+    "42"
+  ],
+  "settings-schema": "org.gnome.shell.extensions.essentials"
+}

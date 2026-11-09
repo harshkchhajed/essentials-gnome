@@ -1,0 +1,126 @@
+#!/bin/bash
+# Adaptive CPU power cap for running on a weak (65 W USB-C) charger.
+#
+# A 65 W charger has to cover CPU + rest of the laptop + battery charging.
+# When the total goes over, the charger trips its overload protection and
+# drops out for ~1 s, many times a minute. This loop watches for those
+# drop-outs and lowers the CPU limit in steps; after a quiet period it raises
+# it again. On the barrel charger it restores the factory limits, and it does
+# the same when the service stops.
+#
+# Charger type comes from the EC (byte 0xA3: bit 7 ADPT = adapter present,
+# bit 3 ACMO = full-power adapter), the bits the firmware's ACTY method uses.
+# If the EC can't be read (ec_sys missing, debugfs not mounted) it falls back
+# to the kernel's adapter/USB-C status.
+#
+# Also, for the Essentials GNOME extension (sudo group = admin users):
+#   - RAPL energy_uj readable (root-only upstream because of the PLATYPUS
+#     power side channel, CVE-2020-8694, so not world-readable)
+#   - Lenovo Conservation Mode (~80% charge limit) writable
+#   - fan speeds in /run/legion-fans
+RAPL=/sys/class/powercap/intel-rapl:0
+MMIO=/sys/class/powercap/intel-rapl-mmio:0   # second limit; the CPU obeys the lower one
+EC=/sys/kernel/debug/ec/ec0/io
+ADP=/sys/class/power_supply/ADP0/online
+UCSI=/sys/class/power_supply/ucsi-source-psy-USBC000:001/online
+CONS=/sys/bus/platform/drivers/ideapad_acpi/VPC2004:00/conservation_mode
+FANS_OUT=/run/legion-fans   # "fan1_rpm fan2_rpm"
+
+MIN=20 MAX=40 STEP=5      # PL1 range on a weak charger, watts
+QUIET0=120                # seconds without drop-outs before stepping up;
+QUIETMAX=960              # doubles after each failed step-up, up to this
+HOLD=10                   # seconds between step-downs
+FULL_PL1=200 FULL_PL2=190 # factory limits
+
+cur_pl1='' cur_pl2=''     # what we last wrote successfully
+
+set_limits() {   # $1 = PL1 watts, $2 = PL2 watts, $3 = reason
+    [ "$1" = "$cur_pl1" ] && [ "$2" = "$cur_pl2" ] && return
+    local z ok=1
+    for z in $RAPL $MMIO; do
+        [ -w "$z/constraint_0_power_limit_uw" ] || continue   # zone not present
+        echo $(( $1 * 1000000 )) > "$z/constraint_0_power_limit_uw" 2>/dev/null || ok=0
+        echo $(( $2 * 1000000 )) > "$z/constraint_1_power_limit_uw" 2>/dev/null || ok=0
+    done
+    if [ $ok = 1 ]; then
+        cur_pl1=$1 cur_pl2=$2
+        logger -t usbc-power-cap "CPU limit $1/$2 W ($3)"
+    fi   # on failure: try again next second, quietly
+}
+
+fix_permissions() {
+    # Re-applied periodically: the drivers may load after this service, or be
+    # re-bound, which resets the permissions.
+    chgrp sudo $RAPL/energy_uj $CONS 2>/dev/null
+    chmod 0440 $RAPL/energy_uj 2>/dev/null
+    chmod 0664 $CONS 2>/dev/null
+}
+
+if [ "$1" = "--restore" ]; then   # ExecStopPost: factory limits even after a crash
+    set_limits $FULL_PL1 $FULL_PL2 "service stopped"
+    rm -f $FANS_OUT
+    exit 0
+fi
+
+trap 'set_limits $FULL_PL1 $FULL_PL2 "service stopped"; rm -f $FANS_OUT; exit 0' TERM INT
+
+modprobe ec_sys 2>/dev/null
+fix_permissions
+
+printf -v now '%(%s)T' -1
+pl1=30 quiet=$QUIET0 went_up=0
+last_drop=$now last_change=$now last_perm=$now prev_adpt=1 ec_ok=1
+while true; do
+    printf -v now '%(%s)T' -1
+    # One read of the whole EC register file per second (bytes 0..255).
+    ec=()
+    read -r -a ec < <(od -An -tu1 -v -N 256 "$EC" 2>/dev/null | tr '\n' ' ')
+    if (( ${#ec[@]} >= 256 )); then
+        b=${ec[163]}
+        adpt=$(( b >> 7 & 1 )) full=$(( b >> 3 & 1 ))
+        (( ec_ok )) || logger -t usbc-power-cap "EC readable again"
+        ec_ok=1
+        # Fan speeds: EC FANS (0x06) and FA2S (0xFE), in units of 100 RPM.
+        echo "$(( ec[6] * 100 )) $(( ec[254] * 100 ))" > $FANS_OUT.tmp && mv $FANS_OUT.tmp $FANS_OUT
+    else
+        (( ec_ok )) && logger -p warning -t usbc-power-cap \
+            "EC unreadable (ec_sys/debugfs?); using kernel adapter status, no fan speeds"
+        ec_ok=0
+        rm -f $FANS_OUT
+        b='kernel'
+        read -r a < $ADP 2>/dev/null || a=0
+        read -r u < $UCSI 2>/dev/null || u=0
+        adpt=$(( a == 1 ))
+        # USB-C power delivery online means the weak charger; otherwise assume barrel.
+        full=$(( adpt && u != 1 ))
+    fi
+
+    if (( adpt && full )); then
+        set_limits $FULL_PL1 $FULL_PL2 "full-power charger"
+        pl1=30 quiet=$QUIET0 went_up=0
+    else
+        # Weak charger, or a drop-out on one, or battery only.
+        if (( prev_adpt && !adpt )); then
+            last_drop=$now
+            # A drop soon after stepping up means that step failed: back off.
+            if (( went_up && now - last_change < 60 )); then
+                quiet=$(( quiet * 2 > QUIETMAX ? QUIETMAX : quiet * 2 ))
+            fi
+            went_up=0
+            if (( pl1 > MIN && now - last_change >= HOLD )); then
+                pl1=$(( pl1 - STEP )); last_change=$now
+            fi
+        elif (( pl1 < MAX && now - last_drop >= quiet && now - last_change >= quiet )); then
+            pl1=$(( pl1 + STEP )); last_change=$now; went_up=1
+        elif (( went_up && now - last_change >= 60 )); then
+            quiet=$QUIET0; went_up=0      # step-up held for a minute: success
+        fi
+        set_limits $pl1 $(( pl1 + 10 )) "weak charger, EC 0xA3=$b"
+    fi
+    prev_adpt=$adpt
+    if (( now - last_perm >= 30 )); then
+        fix_permissions
+        last_perm=$now
+    fi
+    sleep 1 & wait $!   # lets the TERM trap run straight away
+done

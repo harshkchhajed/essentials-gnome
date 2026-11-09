@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Essentials
+Comment=Turn Essentials features on or off: power monitor, recent files, clipboard history, display layouts
+Exec=gnome-extensions prefs essentials@harsh
+Icon=@ICON@
+Categories=Settings;
+Keywords=power;battery;clipboard;recent;files;display;monitor;layout;extension;
+StartupNotify=false
