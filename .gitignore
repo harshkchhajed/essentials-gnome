@@ -1,2 +1,8 @@
 gschemas.compiled
 *.zip
+
+# Local tooling and config, never published
+.claude/
+CLAUDE.md
+.env
+*.local
